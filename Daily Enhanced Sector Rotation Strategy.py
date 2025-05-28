@@ -150,8 +150,8 @@ class IndustryDataset(Dataset):
         
     def __getitem__(self, idx):
         X_seq = self.X[idx:idx+self.seq_length]
-        y = np.array([self.y[idx+self.seq_length-1]])  # Convert single value to array
-        return torch.FloatTensor(X_seq), torch.FloatTensor(y)
+        y = self.y[idx + self.seq_length - 1]
+        return torch.FloatTensor(X_seq), torch.FloatTensor([y])
 
 # 准备LSTM训练数据
 def prepare_lstm_data(data, feature_cols, seq_length=20):
@@ -204,7 +204,7 @@ def train_lstm_model(industry_data, feature_cols, device='cuda' if torch.cuda.is
                 
                 optimizer.zero_grad()
                 outputs, _ = model(batch_X)
-                loss = criterion(outputs.squeeze(), batch_y)
+                loss = criterion(outputs, batch_y)
                 loss.backward()
                 optimizer.step()
                 
