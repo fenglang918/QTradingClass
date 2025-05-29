@@ -1,0 +1,8 @@
+Strategy Performance:
+Total Return: -41.61%
+Annual Return: -13.06%
+Annual Volatility: 23.62%
+Sharpe Ratio: -0.47
+Maximum Drawdown: -54.29%
+Max Drawdown Duration: 7 days
+Monthly Win Rate: 42.55%
