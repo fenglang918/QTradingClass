@@ -69,27 +69,28 @@ class LSTMModel(nn.Module):
 
 # 定义数据集类
 class TimeSeriesDataset(Dataset):
-    def __init__(self, X, y, seq_length=20):
-        # 确保输入数据为float32类型
+    """简单的时间序列数据集，直接返回已经生成好的序列"""
+
+    def __init__(self, X, y):
+        # 直接接收已经构造好的序列数据
         self.X = X.astype(np.float32)
         self.y = y.astype(np.float32)
-        self.seq_length = seq_length
-        
+
     def __len__(self):
-        return len(self.X) - self.seq_length
-    
+        return len(self.X)
+
     def __getitem__(self, idx):
-        # 返回形状为 [seq_length, features] 的序列
-        X_seq = self.X[idx:idx + self.seq_length]
-        y = self.y[idx + self.seq_length - 1]
-        return torch.from_numpy(X_seq).float(), torch.tensor(y, dtype=torch.float32)
+        return (
+            torch.from_numpy(self.X[idx]).float(),
+            torch.tensor(self.y[idx], dtype=torch.float32),
+        )
 
 def prepare_sequences(data, feature_cols, seq_length=20):
-    """
-    准备时序序列数据，确保数据类型为float32
-    """
+    """根据行业构造定长序列，返回序列、标签以及对应的原始索引"""
+
     sequences = []
     targets = []
+    indices = []
     
     # 确保只使用数值型特征列
     numeric_cols = data[feature_cols].select_dtypes(include=[np.number]).columns
@@ -101,17 +102,22 @@ def prepare_sequences(data, feature_cols, seq_length=20):
     
     for industry in data['first_industry_name'].unique():
         industry_data = data[data['first_industry_name'] == industry].sort_values('date')
-        # 只使用数值型特征列
         X = industry_data[numeric_cols].astype(np.float32).values
         y = industry_data['y'].astype(np.float32).values
-        
-        for i in range(len(X) - seq_length + 1):
-            sequences.append(X[i:i + seq_length])
-            targets.append(y[i + seq_length - 1])
-    
-    return np.array(sequences, dtype=np.float32), np.array(targets, dtype=np.float32)
+        idx = industry_data.index.values
 
-def train_lstm_model(X, y, train_mask, val_mask, params=None):
+        for i in range(seq_length - 1, len(X)):
+            sequences.append(X[i - seq_length + 1 : i + 1])
+            targets.append(y[i])
+            indices.append(idx[i])
+
+    return (
+        np.array(sequences, dtype=np.float32),
+        np.array(targets, dtype=np.float32),
+        np.array(indices),
+    )
+
+def train_lstm_model(data, feature_cols, train_mask, val_mask, params=None):
     """
     训练LSTM模型，使用时序划分
     """
@@ -129,16 +135,16 @@ def train_lstm_model(X, y, train_mask, val_mask, params=None):
     
     print(f"\n使用设备: {params['device']}")
     
-    # 准备序列数据
-    X_seq, y_seq = prepare_sequences(X, X.columns, params['seq_length'])
+    # 准备序列数据并记录对应的原始索引
+    X_seq, y_seq, seq_idx = prepare_sequences(data, feature_cols, params['seq_length'])
     
     # 使用时序mask划分训练集和验证集
-    train_indices = np.where(train_mask)[0]
-    val_indices = np.where(val_mask)[0]
+    train_indices = train_mask.loc[seq_idx].values
+    val_indices = val_mask.loc[seq_idx].values
     
     # 确保序列完整性
-    train_indices = train_indices[train_indices + params['seq_length'] - 1 < len(X_seq)]
-    val_indices = val_indices[val_indices + params['seq_length'] - 1 < len(X_seq)]
+    train_indices = np.where(train_indices)[0]
+    val_indices = np.where(val_indices)[0]
     
     X_train = X_seq[train_indices]
     y_train = y_seq[train_indices]
@@ -149,8 +155,8 @@ def train_lstm_model(X, y, train_mask, val_mask, params=None):
     print(f"验证集形状：X_val: {X_val.shape}, y_val: {y_val.shape}")
     
     # 创建数据加载器
-    train_dataset = TimeSeriesDataset(X_train, y_train, params['seq_length'])
-    val_dataset = TimeSeriesDataset(X_val, y_val, params['seq_length'])
+    train_dataset = TimeSeriesDataset(X_train, y_train)
+    val_dataset = TimeSeriesDataset(X_val, y_val)
     
     train_loader = DataLoader(train_dataset, batch_size=params['batch_size'], shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=params['batch_size'], shuffle=False)
@@ -893,7 +899,7 @@ def main():
         device='cuda' if torch.cuda.is_available() else 'cpu'
     )
     
-    model, params = train_lstm_model(ml_df, ml_df['y'], train_mask, val_mask, lstm_params)
+    model, params = train_lstm_model(ml_df, feature_cols, train_mask, val_mask, lstm_params)
     
     # 生成预测并合并回数据
     ml_df = predict_with_lstm(model, ml_df, feature_cols, params)
